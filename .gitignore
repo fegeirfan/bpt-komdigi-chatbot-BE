@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cach/
+.mypy_cache/
+e
+# Environments
+.env
+.venv
+venv/
+ENV/
+
+# Project Specific
+uploads/
+qdrant_storage/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS Related
+.DS_Store
+Thumbs.db
