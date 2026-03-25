@@ -8,7 +8,10 @@ from app.schemas import ChatRequest, ChatResponse, DocumentResponse
 from app.rag import process_document, ask_chatbot
 from app.db import docs_collection, chats_collection
 import datetime
+import google.generativeai as genai
 
+# Initialize Google Generative AI
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 app = FastAPI(title="BPT Komdigi RAG API")
 
 # Setup CORS
@@ -68,3 +71,10 @@ def chat_endpoint(request: ChatRequest):
 def get_documents():
     docs = list(docs_collection.find({}, {"_id": 0}))
     return {"documents": docs}
+@app.get("/cekmodel")
+def cek_model():
+    for m in genai.list_models():
+      print("Nama:", m.name)
+      print("Method:", m.supported_generation_methods)
+      print("-" * 40)
+    return {"model": "gemini-1.5-flash", "embedding_model": "text-embedding-004"}
