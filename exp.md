@@ -8,7 +8,7 @@ Folder ini berisi logika utama *Backend* yang dibangun menggunakan FastAPI + Lan
     Pintu masuk utama (*entry point*) aplikasi FastAPI. File ini mengatur:
     *   Konfigurasi **CORS** (agar Frontend React bisa memanggil API ini).
     *   **Endpoints API**:
-        *   `POST /api/upload`: Menerima file PDF, menyimpannya di folder `uploads/`, lalu memicu proses ekstraksi teks dan embedding.
+        *   `POST /api/upload`: Menerima file PDF, memprosesnya (temporary file) untuk ekstraksi teks + embedding, lalu menyimpan vektor ke Qdrant.
         *   `POST /api/chat`: Menerima pertanyaan pengguna, menjalankan pencarian dokumen relevan, dan mengembalikan jawaban dari AI Gemini.
         *   `GET /api/documents`: Menarik daftar metadata dokumen (nama file, tanggal upload) dari MongoDB.
     *   **Validasi Upload**:
@@ -54,7 +54,7 @@ Folder ini berisi logika utama *Backend* yang dibangun menggunakan FastAPI + Lan
 
 ### Folder Tambahan (Struktur Lanjutan)
 
-*   **`uploads/`**: Folder tempat menyimpan sementara file fisik PDF yang diunggah sebelum diproses.
+*   **`uploads/`**: Tidak dipakai lagi (upload diproses via file temporary dan tidak disimpan permanen).
 *   **(Opsional di masa depan) `controllers/`, `models/`, `routes/`**: Belum ada di struktur saat ini. Biasanya dipakai jika proyek mulai besar dan `main.py` perlu dipisah menjadi modul-modul.
 
 ---

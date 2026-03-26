@@ -1,9 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import shutil
 import datetime
+import os
+import tempfile
 from dotenv import load_dotenv
-from pathlib import Path
 
 from app.schemas import ChatRequest, ChatResponse
 from app.rag import process_document, ask_chatbot
@@ -21,9 +21,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
-
 
 @app.get("/")
 def read_root():
@@ -32,30 +29,31 @@ def read_root():
 
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
+    temp_path = None
     try:
         if not file.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="Hanya mendukung file PDF.")
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         safe_filename = f"{timestamp}_{file.filename}"
-        file_path = UPLOAD_DIR / safe_filename
 
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+            temp_file.write(await file.read())
+            temp_path = temp_file.name
 
-        doc_id = process_document(str(file_path), safe_filename)
+        doc_id = process_document(temp_path, safe_filename)
 
         return {"status": "success", "doc_id": doc_id, "filename": safe_filename}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gagal upload/proses file: {str(e)}")
-
-
-# Backward compatible alias (kalau Swagger/FE sudah terlanjur pakai ini)
-@app.post("/upload-doc/")
-async def upload_doc_alias(file: UploadFile = File(...)):
-    return await upload_file(file)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -82,12 +80,6 @@ def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
 
 
-# Backward compatible alias (kalau Swagger/FE sudah terlanjur pakai ini)
-@app.post("/ask/")
-def ask_alias(request: ChatRequest):
-    return chat_endpoint(request)
-
-
 @app.get("/api/documents")
 def get_documents():
     try:
@@ -95,4 +87,3 @@ def get_documents():
         return {"documents": docs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gagal ambil dokumen: {str(e)}")
-
