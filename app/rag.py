@@ -12,24 +12,37 @@ from app.db import qdrant_client, docs_collection
 # Load environment variables
 load_dotenv()
 
-COLLECTION_NAME = "bpt_docs"
+COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "bpt_docs")
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "150"))
+RETRIEVER_K = int(os.getenv("RETRIEVER_K", "7"))
+
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-005")
 
 # Initialize Vertex AI & Embeddings
 # Pastikan GOOGLE_CLOUD_PROJECT dan GOOGLE_CLOUD_REGION ada di .env
 # Jika menggunakan Service Account, pastikan GOOGLE_APPLICATION_CREDENTIALS tertunjuk ke file JSON
-project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-location = os.getenv("GOOGLE_CLOUD_REGION", "us-central1")
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
+LOCATION = os.getenv("GOOGLE_CLOUD_REGION", "us-central1")
+
+if not PROJECT_ID:
+    raise RuntimeError(
+        "Env GOOGLE_CLOUD_PROJECT belum diset. "
+        "Isi di file .env (lihat .env.example) agar Vertex AI bisa digunakan."
+    )
 
 gemini_model = ChatVertexAI(
-    model_name="gemini-2.5-flash", 
-    project=project_id, 
-    location=location,
-    temperature=0.3
+    model_name=LLM_MODEL,
+    project=PROJECT_ID,
+    location=LOCATION,
+    temperature=LLM_TEMPERATURE,
 )
 embeddings = VertexAIEmbeddings(
-    model_name="text-embedding-004",
-    project=project_id,
-    location=location
+    model_name=EMBEDDING_MODEL,
+    project=PROJECT_ID,
+    location=LOCATION,
 )
 
 def init_qdrant():
@@ -45,6 +58,12 @@ def init_qdrant():
 # Jalankan inisialisasi koleksi saat modul dimuat
 init_qdrant()
 
+vector_store = QdrantVectorStore(
+    client=qdrant_client,
+    collection_name=COLLECTION_NAME,
+    embedding=embeddings,
+)
+
 def process_document(file_path: str, filename: str, uploader: str = "admin"):
     """Fungsi untuk mengekstrak, memotong, dan menyimpan dokumen ke Vector DB (Qdrant)"""
     # 1. Load Document
@@ -58,7 +77,7 @@ def process_document(file_path: str, filename: str, uploader: str = "admin"):
         raise e
     
     # 2. Split Document (Chunking)
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     splits = text_splitter.split_documents(docs)
     
     # Tambahkan metadata untuk pelacakan sumber
@@ -68,13 +87,7 @@ def process_document(file_path: str, filename: str, uploader: str = "admin"):
         split.metadata["filename"] = filename
 
     # 3. Store in Qdrant Vector DB
-    QdrantVectorStore.from_documents(
-        splits, 
-        embeddings, 
-        url=os.getenv("QDRANT_URL", "http://localhost:6333"), 
-        collection_name=COLLECTION_NAME,
-        api_key=os.getenv("QDRANT_API_KEY")
-    )
+    vector_store.add_documents(splits)
     
     # 4. Simpan metadata administratif ke MongoDB
     docs_collection.insert_one({
@@ -90,13 +103,7 @@ def process_document(file_path: str, filename: str, uploader: str = "admin"):
 def ask_chatbot(query: str):
     """Fungsi untuk menjalankan Semantic Search dan sintesis jawaban AI"""
     # 1. Retrieval: Cari potongan teks paling relevan dari Qdrant
-    qdrant = QdrantVectorStore.from_existing_collection(
-        embedding=embeddings,
-        collection_name=COLLECTION_NAME,
-        url=os.getenv("QDRANT_URL", "http://localhost:6333"),
-        api_key=os.getenv("QDRANT_API_KEY"),
-    )
-    retriever = qdrant.as_retriever(search_kwargs={"k": 4})
+    retriever = vector_store.as_retriever(search_kwargs={"k": RETRIEVER_K})
     docs = retriever.invoke(query)
     
     # Menggabungkan potongan teks untuk dijadikan konteks bagi LLM

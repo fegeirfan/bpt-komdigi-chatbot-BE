@@ -21,16 +21,16 @@ Folder ini berisi logika utama *Backend* yang dibangun menggunakan FastAPI + Lan
     Mesin inti AI yang menerapkan metode **RAG (Retrieval-Augmented Generation)**. File ini berisi logika:
     *   **Ekstraksi & Chunking**: Membaca file PDF (`PyPDFLoader`) dan memecahnya menjadi potongan kecil (`RecursiveCharacterTextSplitter`).
         *   Ada validasi error PDF rusak/tidak valid (mis. `invalid pdf header`, `EOF marker not found`) dengan pesan yang lebih jelas.
-    *   **Embedding (Vertex AI)**: Mengubah teks menjadi vektor menggunakan `VertexAIEmbeddings` dengan model `text-embedding-004`.
-    *   **LLM (Vertex AI / Gemini)**: Menjawab menggunakan `ChatVertexAI` dengan model `gemini-2.5-flash` (temperature `0.3`).
+    *   **Embedding (Vertex AI)**: Mengubah teks menjadi vektor menggunakan `VertexAIEmbeddings` (default model: `text-embedding-005`, bisa dioverride via env `EMBEDDING_MODEL`).
+    *   **LLM (Vertex AI / Gemini)**: Menjawab menggunakan `ChatVertexAI` (default model: `gemini-2.5-flash`, temperature default `0.2`, bisa dioverride via env `LLM_MODEL` dan `LLM_TEMPERATURE`).
     *   **Vector DB (Qdrant)**:
         *   Koleksi Qdrant di-*init* saat modul dimuat (`COLLECTION_NAME = "bpt_docs"`). Jika belum ada, dibuat dengan ukuran vektor `768` dan `COSINE` distance.
-        *   Penyimpanan chunk dilakukan via `QdrantVectorStore.from_documents(...)` menggunakan `QDRANT_URL` dan `QDRANT_API_KEY` dari `.env`.
+        *   Penyimpanan dan retrieval dilakukan via `QdrantVectorStore(...)` yang memakai `qdrant_client` dari `db.py` (konfigurasinya mengambil `QDRANT_URL`/`QDRANT_API_KEY` dari `.env`).
     *   **Metadata Dokumen**:
         *   Setiap chunk diberi metadata `doc_id` (UUID) dan `filename` untuk pelacakan sumber.
         *   Metadata administratif disimpan ke MongoDB koleksi `documents` (`doc_id`, `filename`, `uploader`, `status`, `uploaded_at`).
     *   **Chat Logic (Anti-Halusinasi)**:
-        *   Mengambil top-k dokumen relevan (`k=4`) dari Qdrant.
+        *   Mengambil top-k dokumen relevan (default `k=3`, bisa dioverride via env `RETRIEVER_K`) dari Qdrant.
         *   Menggabungkan konteks dan pertanyaan ke *prompt* ketat: jika jawaban tidak ada di konteks, bot diminta menjawab bahwa informasi tidak ditemukan dan mengarahkan ke email resmi.
 
 ### 2. Konfigurasi & Data
