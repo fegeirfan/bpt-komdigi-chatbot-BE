@@ -1,80 +1,125 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
-import os
+import datetime
 from dotenv import load_dotenv
+from pathlib import Path
+
+# Load env
 load_dotenv()
-from app.schemas import ChatRequest, ChatResponse, DocumentResponse
+
+# Import internal modules
+from app.schemas import ChatRequest, ChatResponse
 from app.rag import process_document, ask_chatbot
 from app.db import docs_collection, chats_collection
-import datetime
-import google.generativeai as genai
 
-# Initialize Google Generative AI
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 app = FastAPI(title="BPT Komdigi RAG API")
 
-# Setup CORS
+# =========================
+# CORS (Lebih aman)
+# =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Ganti domain frontend kalau production
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# =========================
+# Folder Upload
+# =========================
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
 
+# =========================
+# Root
+# =========================
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "BPT Komdigi Backend API is running."}
+    return {
+        "status": "ok",
+        "message": "BPT Komdigi Backend API is running."
+    }
 
+# =========================
+# Upload PDF
+# =========================
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Hanya mendukung file PDF saat ini.")
-        
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-        
-    # Process document synchronously (for demo purposes)
     try:
-        doc_id = process_document(file_path, file.filename)
-        return {"status": "success", "doc_id": doc_id, "filename": file.filename}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Validasi file
+        if not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(
+                status_code=400,
+                detail="Hanya mendukung file PDF."
+            )
 
+        # Hindari overwrite file dengan timestamp
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        safe_filename = f"{timestamp}_{file.filename}"
+        file_path = UPLOAD_DIR / safe_filename
+
+        # Simpan file
+        with file_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Proses dokumen
+        doc_id = process_document(str(file_path), safe_filename)
+
+        return {
+            "status": "success",
+            "doc_id": doc_id,
+            "filename": safe_filename
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gagal upload/proses file: {str(e)}"
+        )
+
+# =========================
+# Chat Endpoint
+# =========================
 @app.post("/api/chat", response_model=ChatResponse)
 def chat_endpoint(request: ChatRequest):
     try:
         result = ask_chatbot(request.query)
-        
-        # Save chat to MongoDB
+
+        # Simpan ke MongoDB
         chats_collection.insert_one({
             "session_id": request.session_id,
             "query": request.query,
-            "answer": result["answer"],
-            "sources": result["sources"],
-            "timestamp": datetime.datetime.utcnow().isoformat()
+            "answer": result.get("answer"),
+            "sources": result.get("sources", []),
+            "timestamp": datetime.datetime.utcnow()
         })
-        
+
         return ChatResponse(
-            answer=result["answer"],
-            sources=result["sources"],
+            answer=result.get("answer"),
+            sources=result.get("sources", []),
             session_id=request.session_id
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Chat error: {str(e)}"
+        )
+
+# =========================
+# Get Documents
+# =========================
 @app.get("/api/documents")
 def get_documents():
-    docs = list(docs_collection.find({}, {"_id": 0}))
-    return {"documents": docs}
-@app.get("/cekmodel")
-def cek_model():
-    for m in genai.list_models():
-      print("Nama:", m.name)
-      print("Method:", m.supported_generation_methods)
-      print("-" * 40)
-    return {"model": "gemini-1.5-flash", "embedding_model": "text-embedding-004"}
+    try:
+        docs = list(docs_collection.find({}, {"_id": 0}))
+        return {"documents": docs}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gagal ambil dokumen: {str(e)}"
+        )

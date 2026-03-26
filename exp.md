@@ -1,6 +1,6 @@
 # Penjelasan Struktur Folder `backend/app`
 
-Folder ini berisi logika utama *Backend* yang dibangun menggunakan FastAPI, LangChain, dan terintegrasi dengan AI Gemini. Berikut adalah rincian setiap file:
+Folder ini berisi logika utama *Backend* yang dibangun menggunakan FastAPI + LangChain, terintegrasi dengan **Google Vertex AI (Gemini)** untuk LLM & embedding, serta menggunakan **Qdrant** (vector database) dan **MongoDB** (metadata & chat log). Berikut rincian tiap file sesuai kode saat ini:
 
 ### 1. File Utama Aplikasi
 
@@ -11,13 +11,27 @@ Folder ini berisi logika utama *Backend* yang dibangun menggunakan FastAPI, Lang
         *   `POST /api/upload`: Menerima file PDF, menyimpannya di folder `uploads/`, lalu memicu proses ekstraksi teks dan embedding.
         *   `POST /api/chat`: Menerima pertanyaan pengguna, menjalankan pencarian dokumen relevan, dan mengembalikan jawaban dari AI Gemini.
         *   `GET /api/documents`: Menarik daftar metadata dokumen (nama file, tanggal upload) dari MongoDB.
+    *   **Validasi Upload**:
+        *   Hanya menerima file ber-ekstensi `.pdf`.
+        *   Nama file di-*prefix* timestamp (`YYYYMMDDHHMMSS_`) untuk menghindari overwrite.
+    *   **Penyimpanan Chat**:
+        *   Setiap request `/api/chat` disimpan ke koleksi `chats` di MongoDB (termasuk `session_id`, `sources`, dan timestamp UTC).
 
 *   **`rag.py`**
     Mesin inti AI yang menerapkan metode **RAG (Retrieval-Augmented Generation)**. File ini berisi logika:
     *   **Ekstraksi & Chunking**: Membaca file PDF (`PyPDFLoader`) dan memecahnya menjadi potongan kecil (`RecursiveCharacterTextSplitter`).
-    *   **Embedding**: Mengubah teks menjadi angka vektor menggunakan model `models/embedding-001` (Gemini).
-    *   **Vector DB (Qdrant)**: Mengirim dan menarik data vektor dari database Qdrant.
-    *   **Chat Logic**: Menggabungkan konteks dokumen dengan pertanyaan pengguna ke dalam *System Prompt* yang ketat agar AI tidak mengarang jawaban.
+        *   Ada validasi error PDF rusak/tidak valid (mis. `invalid pdf header`, `EOF marker not found`) dengan pesan yang lebih jelas.
+    *   **Embedding (Vertex AI)**: Mengubah teks menjadi vektor menggunakan `VertexAIEmbeddings` dengan model `text-embedding-004`.
+    *   **LLM (Vertex AI / Gemini)**: Menjawab menggunakan `ChatVertexAI` dengan model `gemini-2.5-flash` (temperature `0.3`).
+    *   **Vector DB (Qdrant)**:
+        *   Koleksi Qdrant di-*init* saat modul dimuat (`COLLECTION_NAME = "bpt_docs"`). Jika belum ada, dibuat dengan ukuran vektor `768` dan `COSINE` distance.
+        *   Penyimpanan chunk dilakukan via `QdrantVectorStore.from_documents(...)` menggunakan `QDRANT_URL` dan `QDRANT_API_KEY` dari `.env`.
+    *   **Metadata Dokumen**:
+        *   Setiap chunk diberi metadata `doc_id` (UUID) dan `filename` untuk pelacakan sumber.
+        *   Metadata administratif disimpan ke MongoDB koleksi `documents` (`doc_id`, `filename`, `uploader`, `status`, `uploaded_at`).
+    *   **Chat Logic (Anti-Halusinasi)**:
+        *   Mengambil top-k dokumen relevan (`k=4`) dari Qdrant.
+        *   Menggabungkan konteks dan pertanyaan ke *prompt* ketat: jika jawaban tidak ada di konteks, bot diminta menjawab bahwa informasi tidak ditemukan dan mengarahkan ke email resmi.
 
 ### 2. Konfigurasi & Data
 
@@ -25,7 +39,10 @@ Folder ini berisi logika utama *Backend* yang dibangun menggunakan FastAPI, Lang
     Mengatur koneksi ke dua jenis database:
     *   **MongoDB**: Menggunakan `pymongo` untuk menyimpan data administratif/klasik (metadata dokumen dan riwayat pesan chat).
     *   **Qdrant**: Menggunakan `qdrant-client` untuk menyimpan data vektor teks agar bisa dicari secara cerdas (*Semantic Search*).
-    *   Dilengkapi dengan sistem *fallback* (nilai bawaan) jika variabel di file `.env` tidak ditemukan.
+    *   Dilengkapi *fallback* nilai bawaan jika variabel di `.env` tidak ditemukan (mis. `mongodb://localhost:27017` dan `http://localhost:6333`).
+    *   Environment yang digunakan:
+        *   `MONGODB_URI`, `MONGODB_DB_NAME`
+        *   `QDRANT_URL`, `QDRANT_API_KEY`
 
 *   **`schemas.py`**
     Berisi definisi struktur data menggunakan **Pydantic**. Ini memastikan data yang dikirim oleh pengguna (seperti JSON pertanyaan) dan data yang dikirim balik oleh server memiliki format yang tepat dan aman. Contoh: `ChatRequest`, `ChatResponse`.
@@ -38,4 +55,14 @@ Folder ini berisi logika utama *Backend* yang dibangun menggunakan FastAPI, Lang
 ### Folder Tambahan (Struktur Lanjutan)
 
 *   **`uploads/`**: Folder tempat menyimpan sementara file fisik PDF yang diunggah sebelum diproses.
-*   **`controllers/`, `models/`, `routes/`**: Folder yang disiapkan untuk pengembangan skala besar di masa depan jika `main.py` sudah terlalu panjang. Saat ini logika masih disatukan untuk kemudahan uji coba awal.
+*   **(Opsional di masa depan) `controllers/`, `models/`, `routes/`**: Belum ada di struktur saat ini. Biasanya dipakai jika proyek mulai besar dan `main.py` perlu dipisah menjadi modul-modul.
+
+---
+
+### Catatan Konfigurasi Vertex AI (Gemini)
+
+Untuk menjalankan integrasi Vertex AI di `rag.py`, pastikan environment berikut tersedia:
+
+*   `GOOGLE_CLOUD_PROJECT`
+*   `GOOGLE_CLOUD_REGION` (default: `us-central1`)
+*   Jika memakai service account: `GOOGLE_APPLICATION_CREDENTIALS` mengarah ke file JSON kredensial
