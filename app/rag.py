@@ -29,6 +29,11 @@ RAG_CACHE_TTL_SECONDS = int(os.getenv("RAG_CACHE_TTL_SECONDS", "3600"))
 RAG_CACHE_PREFIX = os.getenv("RAG_CACHE_PREFIX", "rag:cache:v1").strip() or "rag:cache:v1"
 RAG_DATA_VERSION_KEY = os.getenv("RAG_DATA_VERSION_KEY", "rag:data_version").strip() or "rag:data_version"
 
+# Support / escalation contacts (used when info not found in documents)
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "bpt@komdigi.go.id").strip() or "bpt@komdigi.go.id"
+SUPPORT_WHATSAPP = os.getenv("SUPPORT_WHATSAPP", "").strip()
+SUPPORT_TICKETING_URL = os.getenv("SUPPORT_TICKETING_URL", "").strip()
+
 # Initialize Vertex AI & Embeddings
 # Pastikan GOOGLE_CLOUD_PROJECT dan GOOGLE_CLOUD_REGION ada di .env
 # Jika menggunakan Service Account, pastikan GOOGLE_APPLICATION_CREDENTIALS tertunjuk ke file JSON
@@ -108,9 +113,25 @@ def _cache_key_for_query(query: str) -> str:
         "embedding_model": EMBEDDING_MODEL,
         "project": PROJECT_ID,
         "location": LOCATION,
+        "support_email": SUPPORT_EMAIL,
+        "support_whatsapp": SUPPORT_WHATSAPP,
+        "support_ticketing_url": SUPPORT_TICKETING_URL,
     }
     digest = hashlib.sha256(json.dumps(fingerprint, sort_keys=True).encode("utf-8")).hexdigest()
     return f"{RAG_CACHE_PREFIX}:{digest}"
+
+
+def _fallback_message() -> str:
+    parts = [
+        "Maaf, informasi tersebut tidak ditemukan di dokumen resmi kami.",
+    ]
+    if SUPPORT_WHATSAPP:
+        parts.append(f"Silakan hubungi WhatsApp: {SUPPORT_WHATSAPP}.")
+    if SUPPORT_TICKETING_URL:
+        parts.append(f"Atau buat tiket melalui: {SUPPORT_TICKETING_URL}.")
+    if SUPPORT_EMAIL:
+        parts.append(f"Email: {SUPPORT_EMAIL}.")
+    return " ".join(parts).strip()
 
 
 def process_document(file_path: str, filename: str, uploader: str = "admin"):
@@ -176,7 +197,8 @@ def ask_chatbot(query: str):
     # 2. Prompt Template (Anti-Halusinasi)
     template = """Anda adalah Asisten Resmi BPT Komdigi.
 Tugas Anda adalah memberikan jawaban yang ramah, sopan, dan akurat dari pertanyaan pengguna.
-Gunakan HANYA teks referensi (Konteks) berikut untuk menjawab. Jika jawabannya tidak ada di referensi, katakan "Maaf, informasi tersebut tidak ditemukan di dokumen resmi kami. Silakan hubungi bpt@komdigi.go.id".
+Gunakan HANYA teks referensi (Konteks) berikut untuk menjawab.
+Jika jawabannya tidak ada di referensi, jawab dengan kalimat berikut (tanpa menambah informasi lain): "{fallback}"
 
 Referensi (Konteks):
 {context}
@@ -189,10 +211,15 @@ Jawaban Anda:"""
     chain = prompt | gemini_model
     
     # 3. Dekonstruksi dan panggil LLM Gemini
-    response = chain.invoke({"context": context, "question": query})
+    response = chain.invoke({"context": context, "question": query, "fallback": _fallback_message()})
     
+    answer = response.content or ""
+    fallback = _fallback_message()
+    if "tidak ditemukan" in answer.lower() and fallback not in answer:
+        answer = fallback
+
     result = {
-        "answer": response.content,
+        "answer": answer,
         "sources": sources
     }
 
