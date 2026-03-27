@@ -4,6 +4,7 @@ import datetime
 import os
 import tempfile
 from dotenv import load_dotenv
+from pathlib import Path
 
 from app.schemas import ChatRequest, ChatResponse
 from app.rag import process_document, ask_chatbot
@@ -31,13 +32,18 @@ def read_root():
 async def upload_file(file: UploadFile = File(...)):
     temp_path = None
     try:
-        if not file.filename.lower().endswith(".pdf"):
-            raise HTTPException(status_code=400, detail="Hanya mendukung file PDF.")
+        ext = Path(file.filename).suffix.lower()
+        allowed_exts = {".pdf", ".doc", ".docx", ".csv", ".xlsx", ".png", ".jpg", ".jpeg"}
+        if ext not in allowed_exts:
+            raise HTTPException(
+                status_code=400,
+                detail="Format tidak didukung. Gunakan PDF/DOC/DOCX/CSV/XLSX/PNG/JPG.",
+            )
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         safe_filename = f"{timestamp}_{file.filename}"
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
             temp_file.write(await file.read())
             temp_path = temp_file.name
 
