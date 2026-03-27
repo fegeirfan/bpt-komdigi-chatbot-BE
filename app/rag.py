@@ -1,13 +1,15 @@
 import os
 import uuid
 import datetime
+import json
+import hashlib
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_vertexai import ChatVertexAI, VertexAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from langchain_core.prompts import PromptTemplate
-from app.db import qdrant_client, docs_collection
+from app.db import qdrant_client, docs_collection, get_redis_client
 
 # Load environment variables
 load_dotenv()
@@ -20,6 +22,12 @@ RETRIEVER_K = int(os.getenv("RETRIEVER_K", "7"))
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-005")
+
+# Redis cache config (response cache)
+RAG_CACHE_ENABLED = os.getenv("RAG_CACHE_ENABLED", "1").strip() not in ("0", "false", "False", "no", "NO")
+RAG_CACHE_TTL_SECONDS = int(os.getenv("RAG_CACHE_TTL_SECONDS", "3600"))
+RAG_CACHE_PREFIX = os.getenv("RAG_CACHE_PREFIX", "rag:cache:v1").strip() or "rag:cache:v1"
+RAG_DATA_VERSION_KEY = os.getenv("RAG_DATA_VERSION_KEY", "rag:data_version").strip() or "rag:data_version"
 
 # Initialize Vertex AI & Embeddings
 # Pastikan GOOGLE_CLOUD_PROJECT dan GOOGLE_CLOUD_REGION ada di .env
@@ -64,6 +72,47 @@ vector_store = QdrantVectorStore(
     embedding=embeddings,
 )
 
+
+def _get_data_version() -> str:
+    redis_client = get_redis_client()
+    if not (RAG_CACHE_ENABLED and redis_client):
+        return "0"
+    try:
+        version = redis_client.get(RAG_DATA_VERSION_KEY)
+        return version or "0"
+    except Exception:
+        return "0"
+
+
+def _bump_data_version():
+    redis_client = get_redis_client()
+    if not (RAG_CACHE_ENABLED and redis_client):
+        return
+    try:
+        redis_client.incr(RAG_DATA_VERSION_KEY)
+    except Exception:
+        pass
+
+
+def _cache_key_for_query(query: str) -> str:
+    normalized_query = " ".join(query.strip().lower().split())
+    fingerprint = {
+        "data_version": _get_data_version(),
+        "query": normalized_query,
+        "collection": COLLECTION_NAME,
+        "retriever_k": RETRIEVER_K,
+        "chunk_size": CHUNK_SIZE,
+        "chunk_overlap": CHUNK_OVERLAP,
+        "llm_model": LLM_MODEL,
+        "llm_temperature": LLM_TEMPERATURE,
+        "embedding_model": EMBEDDING_MODEL,
+        "project": PROJECT_ID,
+        "location": LOCATION,
+    }
+    digest = hashlib.sha256(json.dumps(fingerprint, sort_keys=True).encode("utf-8")).hexdigest()
+    return f"{RAG_CACHE_PREFIX}:{digest}"
+
+
 def process_document(file_path: str, filename: str, uploader: str = "admin"):
     """Fungsi untuk mengekstrak, memotong, dan menyimpan dokumen ke Vector DB (Qdrant)"""
     # 1. Load Document
@@ -97,11 +146,25 @@ def process_document(file_path: str, filename: str, uploader: str = "admin"):
         "status": "ready",
         "uploaded_at": datetime.datetime.utcnow().isoformat()
     })
+
+    # Bump data version supaya cache query otomatis pindah ke versi baru
+    _bump_data_version()
     
     return doc_id
 
 def ask_chatbot(query: str):
     """Fungsi untuk menjalankan Semantic Search dan sintesis jawaban AI"""
+    redis_client = get_redis_client() if RAG_CACHE_ENABLED else None
+    cache_key = None
+    if redis_client:
+        cache_key = _cache_key_for_query(query)
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            cache_key = None
+
     # 1. Retrieval: Cari potongan teks paling relevan dari Qdrant
     retriever = vector_store.as_retriever(search_kwargs={"k": RETRIEVER_K})
     docs = retriever.invoke(query)
@@ -128,7 +191,15 @@ Jawaban Anda:"""
     # 3. Dekonstruksi dan panggil LLM Gemini
     response = chain.invoke({"context": context, "question": query})
     
-    return {
+    result = {
         "answer": response.content,
         "sources": sources
     }
+
+    if redis_client and cache_key:
+        try:
+            redis_client.setex(cache_key, RAG_CACHE_TTL_SECONDS, json.dumps(result, ensure_ascii=False))
+        except Exception:
+            pass
+
+    return result
