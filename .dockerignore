@@ -1,0 +1,43 @@
+# Ignore environment variables
+.env
+.env.example
+
+# Ignore Python artifacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Ignore local configs
+.vscode/
+.idea/
+*.swp
+
+# Ignore Git
+.git/
+.gitignore
+
+# Ignore build files
+Dockerfile
+.dockerignore
+build/
+dist/
+*.egg-info/
+
+# Ignore local DBs/caches if any
+*.sqlite3
+storage/
+
+# Ignore large documents or other non-essential files
+*.pdf
+*.docx
+*.csv
+*.xlsx
+*.png
+*.jpg
+*.jpeg
