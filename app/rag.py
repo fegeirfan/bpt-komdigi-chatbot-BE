@@ -22,7 +22,7 @@ location = os.getenv("GOOGLE_CLOUD_REGION", "us-central1")
 
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-005").strip() or "text-embedding-005"
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "textembedding-gecko@003").strip() or "text-embedding-005"
 
 gemini_model = ChatVertexAI(
     model_name=LLM_MODEL,
@@ -31,8 +31,6 @@ gemini_model = ChatVertexAI(
     temperature=LLM_TEMPERATURE,
 )
 embeddings = VertexAIEmbeddings(
-    # NOTE: `text-embedding-004` sudah tidak diterima oleh versi langchain_google_vertexai tertentu.
-    # Gunakan `text-embedding-005` (default) atau override lewat env `EMBEDDING_MODEL`.
     model_name=EMBEDDING_MODEL,
     project=project_id,
     location=location
