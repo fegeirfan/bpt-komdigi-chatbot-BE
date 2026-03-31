@@ -23,8 +23,6 @@ htmlcov/
 .gitignore
 
 # Ignore build files
-Dockerfile
-.dockerignore
 build/
 dist/
 *.egg-info/
