@@ -7,11 +7,8 @@ ENV PYTHONUNBUFFERED=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-<<<<<<< HEAD:dockerfile
     build-essential \
     python3-dev \
-=======
->>>>>>> 3fad738c94cfff81c9109136cffb7ee0533cedc3:Dockerfile
     libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
