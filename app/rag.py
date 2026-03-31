@@ -20,14 +20,20 @@ COLLECTION_NAME = "bpt_docs"
 project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
 location = os.getenv("GOOGLE_CLOUD_REGION", "us-central1")
 
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-005").strip() or "text-embedding-005"
+
 gemini_model = ChatVertexAI(
-    model_name="gemini-1.5-flash", 
-    project=project_id, 
+    model_name=LLM_MODEL,
+    project=project_id,
     location=location,
-    temperature=0.3
+    temperature=LLM_TEMPERATURE,
 )
 embeddings = VertexAIEmbeddings(
-    model_name="text-embedding-004",
+    # NOTE: `text-embedding-004` sudah tidak diterima oleh versi langchain_google_vertexai tertentu.
+    # Gunakan `text-embedding-005` (default) atau override lewat env `EMBEDDING_MODEL`.
+    model_name=EMBEDDING_MODEL,
     project=project_id,
     location=location
 )
