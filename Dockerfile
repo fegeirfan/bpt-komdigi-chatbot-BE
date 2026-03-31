@@ -8,6 +8,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Set working directory
 WORKDIR /app
 
+# System deps: needed when some Python wheels are unavailable and pip must build from source
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Upgrade pip
 RUN pip install --no-cache-dir --upgrade pip
 
