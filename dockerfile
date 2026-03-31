@@ -32,3 +32,5 @@ EXPOSE 8000
 # We use 0.0.0.0 to bind to all interfaces
 # Railway provides the port via the PORT environment variable
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+
+
