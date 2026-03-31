@@ -10,7 +10,7 @@ pandas==2.2.2
 openpyxl==3.1.5
 docx2txt==0.8
 easyocr==1.7.1
-langchain-google-vertexai>=1.0.0
+langchain-google-verteuxai>=1.0.0
 langchain-community>=0.2.0
 langchain-qdrant
 pdfplumber==0.11.0
