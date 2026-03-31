@@ -14,7 +14,7 @@ from langchain_core.documents import Document
 def load_documents(file_path: str, filename: str) -> List[Document]:
     """
     Load a file into LangChain Documents based on its extension.
-    Supports: pdf, docx, doc (best-effort), csv, xlsx, images (via EasyOCR).
+    Supports: pdf, docx, doc (best-effort), csv, xlsx, images (via OCR service).
     """
     ext = Path(filename).suffix.lower()
 
@@ -63,35 +63,20 @@ def load_documents(file_path: str, filename: str) -> List[Document]:
         return docs
 
     if ext in (".png", ".jpg", ".jpeg"):
-        return _load_image_with_easyocr(file_path, filename)
+        return _load_image_with_ocr_service(file_path, filename)
 
     raise ValueError(f"Format file '{ext}' belum didukung. Gunakan PDF/DOCX/CSV/XLSX/PNG/JPG.")
 
 
-def _load_image_with_easyocr(file_path: str, filename: str) -> List[Document]:
+def _load_image_with_ocr_service(file_path: str, filename: str) -> List[Document]:
     service_url = (os.getenv("OCR_SERVICE_URL") or "").strip()
     if service_url:
         return _load_image_via_ocr_service(file_path=file_path, filename=filename, service_url=service_url)
 
-    try:
-        import easyocr
-    except Exception as e:
-        raise ValueError(
-            "EasyOCR belum terpasang/siap. "
-            "Jalankan OCR via service dengan set env OCR_SERVICE_URL, atau install dependency easyocr (dan torch)."
-        ) from e
-
-    # Lazy singleton reader (init-nya berat)
-    if not hasattr(_load_image_with_easyocr, "_reader"):
-        langs = ["id", "en"]
-        _load_image_with_easyocr._reader = easyocr.Reader(langs, gpu=False)  # type: ignore[attr-defined]
-
-    reader = _load_image_with_easyocr._reader  # type: ignore[attr-defined]
-    lines = reader.readtext(file_path, detail=0)
-    text = "\n".join([str(x).strip() for x in lines if str(x).strip()])
-    if not text.strip():
-        text = ""
-    return [Document(page_content=text, metadata={"source": filename, "type": "image"})]
+    raise ValueError(
+        "OCR untuk gambar sudah dipisah ke service terpisah. "
+        "Set env OCR_SERVICE_URL (contoh: http://localhost:8001) agar upload PNG/JPG bisa diproses."
+    )
 
 
 def _load_image_via_ocr_service(file_path: str, filename: str, service_url: str) -> List[Document]:
