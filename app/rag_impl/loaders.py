@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import base64
+import json
+import os
 from pathlib import Path
 from typing import List
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from langchain_core.documents import Document
 
@@ -64,11 +69,16 @@ def load_documents(file_path: str, filename: str) -> List[Document]:
 
 
 def _load_image_with_easyocr(file_path: str, filename: str) -> List[Document]:
+    service_url = (os.getenv("OCR_SERVICE_URL") or "").strip()
+    if service_url:
+        return _load_image_via_ocr_service(file_path=file_path, filename=filename, service_url=service_url)
+
     try:
         import easyocr
     except Exception as e:
         raise ValueError(
-            "EasyOCR belum terpasang/siap. Install dependency easyocr (dan torch) untuk OCR gambar."
+            "EasyOCR belum terpasang/siap. "
+            "Jalankan OCR via service dengan set env OCR_SERVICE_URL, atau install dependency easyocr (dan torch)."
         ) from e
 
     # Lazy singleton reader (init-nya berat)
@@ -83,3 +93,39 @@ def _load_image_with_easyocr(file_path: str, filename: str) -> List[Document]:
         text = ""
     return [Document(page_content=text, metadata={"source": filename, "type": "image"})]
 
+
+def _load_image_via_ocr_service(file_path: str, filename: str, service_url: str) -> List[Document]:
+    langs_raw = (os.getenv("OCR_LANGS") or "id,en").strip()
+    langs = [x.strip() for x in langs_raw.split(",") if x.strip()]
+
+    try:
+        with open(file_path, "rb") as f:
+            image_base64 = base64.b64encode(f.read()).decode("ascii")
+    except Exception as e:
+        raise ValueError(f"Gagal membaca file gambar '{filename}': {str(e)}") from e
+
+    payload = {"image_base64": image_base64, "filename": filename, "langs": langs}
+    body = json.dumps(payload).encode("utf-8")
+
+    url = service_url.rstrip("/") + "/ocr/base64"
+    req = Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json")
+
+    try:
+        with urlopen(req, timeout=60) as resp:
+            raw = resp.read().decode("utf-8")
+        data = json.loads(raw or "{}")
+    except HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8")
+        except Exception:
+            detail = str(e)
+        raise ValueError(f"OCR service error ({e.code}): {detail}") from e
+    except URLError as e:
+        raise ValueError(f"Gagal menghubungi OCR service: {str(e)}") from e
+    except Exception as e:
+        raise ValueError(f"OCR via service gagal: {str(e)}") from e
+
+    text = (data.get("text") or "").strip()
+    return [Document(page_content=text, metadata={"source": filename, "type": "image", "ocr": "service"})]
