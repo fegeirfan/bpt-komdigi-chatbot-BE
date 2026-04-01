@@ -74,8 +74,21 @@ def _init_docs_collection():
         )
 
 
-_init_docs_collection()
-cache.ensure_semantic_collection(SEMANTIC_CACHE_ENABLED, SEMANTIC_CACHE_COLLECTION, vector_size=768)
+def _ensure_qdrant_ready() -> None:
+    # IMPORTANT: do not run on import; keep app boot stable (so `/docs` can load).
+    try:
+        _init_docs_collection()
+        cache.ensure_semantic_collection(SEMANTIC_CACHE_ENABLED, SEMANTIC_CACHE_COLLECTION, vector_size=768)
+    except Exception as e:
+        raise RuntimeError(
+            "Qdrant belum siap/konfigurasi belum benar. "
+            "Cek env QDRANT_URL/QDRANT_API_KEY dan pastikan Qdrant dapat diakses dari Railway."
+        ) from e
+
+
+@lru_cache(maxsize=1)
+def _ensure_backend_ready() -> None:
+    _ensure_qdrant_ready()
 
 
 def _require_project() -> str:
@@ -116,6 +129,7 @@ def _get_vector_store() -> QdrantVectorStore:
 
 
 def process_document(file_path: str, filename: str, uploader: str = "admin"):
+    _ensure_backend_ready()
     docs = load_documents(file_path, filename)
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
@@ -143,6 +157,7 @@ def process_document(file_path: str, filename: str, uploader: str = "admin"):
 
 
 def ask_chatbot(query: str):
+    _ensure_backend_ready()
     data_version = cache.get_data_version(RAG_CACHE_ENABLED, RAG_DATA_VERSION_KEY)
 
     fingerprint = {
