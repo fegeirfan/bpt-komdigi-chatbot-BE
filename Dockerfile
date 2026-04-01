@@ -27,8 +27,9 @@ RUN pip install -r requirements.txt --retries 10 --timeout 100
 # Copy application code
 COPY . .
 
-# Expose port (Railway will provide this via $PORT environment variable)
+# Expose ports (Railway commonly routes to 8080 for Docker deployments)
 EXPOSE 8000
+EXPOSE 8080
 
 # Start the application
 # Railway provides the port via the PORT environment variable
