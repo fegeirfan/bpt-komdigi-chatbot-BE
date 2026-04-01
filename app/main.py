@@ -19,9 +19,19 @@ ensure_google_application_credentials()
 
 from app.db import chats_collection, docs_collection  # noqa: E402
 
-logger = logging.getLogger("app")
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="BPT Komdigi RAG API")
+
+
+@app.on_event("startup")
+async def _startup_log():
+    logger.info(
+        "Startup OK | PORT=%s DEBUG_REQUEST_LOG=%s LOG_LEVEL=%s",
+        os.getenv("PORT"),
+        os.getenv("DEBUG_REQUEST_LOG"),
+        os.getenv("LOG_LEVEL"),
+    )
 
 app.add_middleware(
     CORSMiddleware,
