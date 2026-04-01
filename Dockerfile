@@ -31,6 +31,6 @@ COPY . .
 EXPOSE 8000
 
 # Start the application
-# We use 0.0.0.0 to bind to all interfaces
 # Railway provides the port via the PORT environment variable
-CMD ["sh", "-c", "echo PORT=$PORT && uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
+# Start via Python to avoid shell quoting / expansion issues
+CMD ["python", "-m", "app.run"]
