@@ -1,16 +1,20 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 import datetime
 import os
 import tempfile
-from dotenv import load_dotenv
 from pathlib import Path
 
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.gcp_credentials import ensure_google_application_credentials
 from app.schemas import ChatRequest, ChatResponse
-from app.rag import process_document, ask_chatbot
-from app.db import docs_collection, chats_collection
 
 load_dotenv()
+ensure_google_application_credentials()
+
+from app.db import chats_collection, docs_collection  # noqa: E402
+from app.rag import ask_chatbot, process_document  # noqa: E402
 
 app = FastAPI(title="BPT Komdigi RAG API")
 
