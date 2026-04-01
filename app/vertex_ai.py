@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Iterable, List, Optional, Sequence
 
 from langchain_core.embeddings import Embeddings
@@ -27,6 +28,13 @@ def init_vertex_ai(project: str, location: str) -> None:
     vertexai.init(project=project, location=location)
 
 
+def _hint_auth() -> str:
+    return (
+        "Pastikan env GOOGLE_CLOUD_PROJECT dan GOOGLE_CLOUD_REGION terisi, dan kredensial GCP tersedia. "
+        "Jika deploy di Railway, gunakan GOOGLE_APPLICATION_CREDENTIALS_JSON (lihat .env.example)."
+    )
+
+
 class VertexAITextEmbeddings(Embeddings):
     def __init__(
         self,
@@ -36,12 +44,10 @@ class VertexAITextEmbeddings(Embeddings):
         location: str,
         batch_size: int = 32,
     ) -> None:
-        init_vertex_ai(project, location)
-        from vertexai.language_models import TextEmbeddingModel
-
         self._model_name = model_name
         self._batch_size = batch_size
-        self._model = TextEmbeddingModel.from_pretrained(model_name)
+        self._project = project
+        self._location = location
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         from vertexai.language_models import TextEmbeddingInput
@@ -53,9 +59,17 @@ class VertexAITextEmbeddings(Embeddings):
         normalized = [_normalize_text(t) for t in texts]
 
         for batch in _chunked(normalized, self._batch_size):
-            inputs = [TextEmbeddingInput(text=b) for b in batch]
-            results = self._model.get_embeddings(inputs)
-            vectors.extend([r.values for r in results])
+            try:
+                model = _get_text_embedding_model(
+                    project=self._project,
+                    location=self._location,
+                    model_name=self._model_name,
+                )
+                inputs = [TextEmbeddingInput(text=b) for b in batch]
+                results = model.get_embeddings(inputs)
+                vectors.extend([r.values for r in results])
+            except Exception as e:
+                raise RuntimeError(f"Gagal membuat embedding via Vertex AI. {_hint_auth()}") from e
 
         return vectors
 
@@ -72,17 +86,29 @@ class VertexAIGenerativeText:
     max_output_tokens: int = 1024
 
     def __post_init__(self) -> None:
-        init_vertex_ai(self.project, self.location)
+        # Lazy init is done in generate(); keep __post_init__ empty to avoid import-time crashes.
+        return None
 
     def generate(self, prompt: str) -> str:
-        from vertexai.preview.generative_models import GenerationConfig, GenerativeModel
+        try:
+            init_vertex_ai(self.project, self.location)
+            from vertexai.preview.generative_models import GenerationConfig, GenerativeModel
 
-        model = GenerativeModel(self.model_name)
-        cfg = GenerationConfig(
-            temperature=self.temperature,
-            max_output_tokens=self.max_output_tokens,
-        )
-        resp = model.generate_content(prompt, generation_config=cfg)
-        text: Optional[str] = getattr(resp, "text", None)
-        return (text or "").strip()
+            model = GenerativeModel(self.model_name)
+            cfg = GenerationConfig(
+                temperature=self.temperature,
+                max_output_tokens=self.max_output_tokens,
+            )
+            resp = model.generate_content(prompt, generation_config=cfg)
+            text: Optional[str] = getattr(resp, "text", None)
+            return (text or "").strip()
+        except Exception as e:
+            raise RuntimeError(f"Gagal generate jawaban via Vertex AI. {_hint_auth()}") from e
 
+
+@lru_cache(maxsize=8)
+def _get_text_embedding_model(*, project: str, location: str, model_name: str):
+    init_vertex_ai(project, location)
+    from vertexai.language_models import TextEmbeddingModel
+
+    return TextEmbeddingModel.from_pretrained(model_name)

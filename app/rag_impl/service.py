@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import os
 import uuid
+from functools import lru_cache
 
 from dotenv import load_dotenv
 from langchain_qdrant import QdrantVectorStore
@@ -28,11 +29,6 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-005")
 
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
 LOCATION = os.getenv("GOOGLE_CLOUD_REGION", "us-central1")
-
-if not PROJECT_ID:
-    raise RuntimeError(
-        "Env GOOGLE_CLOUD_PROJECT belum diset. Isi di file .env (lihat .env.example) agar Vertex AI bisa digunakan."
-    )
 
 # Redis cache
 RAG_CACHE_ENABLED = os.getenv("RAG_CACHE_ENABLED", "1").strip() not in ("0", "false", "False", "no", "NO")
@@ -82,24 +78,41 @@ _init_docs_collection()
 cache.ensure_semantic_collection(SEMANTIC_CACHE_ENABLED, SEMANTIC_CACHE_COLLECTION, vector_size=768)
 
 
-embeddings = VertexAITextEmbeddings(
-    model_name=EMBEDDING_MODEL,
-    project=PROJECT_ID,
-    location=LOCATION,
-)
+def _require_project() -> str:
+    project = (PROJECT_ID or "").strip()
+    if not project:
+        raise RuntimeError(
+            "Env GOOGLE_CLOUD_PROJECT belum diset. Isi di .env / Railway variables agar Vertex AI bisa digunakan."
+        )
+    return project
 
-llm = VertexAIGenerativeText(
-    model_name=LLM_MODEL,
-    project=PROJECT_ID,
-    location=LOCATION,
-    temperature=LLM_TEMPERATURE,
-)
 
-vector_store = QdrantVectorStore(
-    client=qdrant_client,
-    collection_name=COLLECTION_NAME,
-    embedding=embeddings,
-)
+@lru_cache(maxsize=1)
+def _get_embeddings() -> VertexAITextEmbeddings:
+    return VertexAITextEmbeddings(
+        model_name=(EMBEDDING_MODEL or "text-embedding-005").strip() or "text-embedding-005",
+        project=_require_project(),
+        location=(LOCATION or "us-central1").strip() or "us-central1",
+    )
+
+
+@lru_cache(maxsize=1)
+def _get_llm() -> VertexAIGenerativeText:
+    return VertexAIGenerativeText(
+        model_name=(LLM_MODEL or "gemini-2.5-flash").strip() or "gemini-2.5-flash",
+        project=_require_project(),
+        location=(LOCATION or "us-central1").strip() or "us-central1",
+        temperature=LLM_TEMPERATURE,
+    )
+
+
+@lru_cache(maxsize=1)
+def _get_vector_store() -> QdrantVectorStore:
+    return QdrantVectorStore(
+        client=qdrant_client,
+        collection_name=COLLECTION_NAME,
+        embedding=_get_embeddings(),
+    )
 
 
 def process_document(file_path: str, filename: str, uploader: str = "admin"):
@@ -113,7 +126,7 @@ def process_document(file_path: str, filename: str, uploader: str = "admin"):
         split.metadata["doc_id"] = doc_id
         split.metadata["filename"] = filename
 
-    vector_store.add_documents(splits)
+    _get_vector_store().add_documents(splits)
 
     docs_collection.insert_one(
         {
@@ -168,13 +181,13 @@ def ask_chatbot(query: str):
         query=query,
         data_version=data_version,
         filters=semantic_filters,
-        embeddings=embeddings,
+        embeddings=_get_embeddings(),
         redis_enabled=RAG_CACHE_ENABLED,
     )
     if semantic_hit:
         return semantic_hit
 
-    retriever = vector_store.as_retriever(search_kwargs={"k": RETRIEVER_K})
+    retriever = _get_vector_store().as_retriever(search_kwargs={"k": RETRIEVER_K})
     docs = retriever.invoke(query)
 
     context = "\n\n".join([doc.page_content for doc in docs])
@@ -193,7 +206,7 @@ Pertanyaan Pengguna: {question}
 Jawaban Anda:"""
 
     prompt = template.format(context=context, question=query, fallback=_fallback_message())
-    answer = llm.generate(prompt)
+    answer = _get_llm().generate(prompt)
 
     answer = (answer or "").strip()
     fallback = _fallback_message()
@@ -208,7 +221,7 @@ Jawaban Anda:"""
         collection_name=SEMANTIC_CACHE_COLLECTION,
         query=query,
         data_version=data_version,
-        embeddings=embeddings,
+        embeddings=_get_embeddings(),
         filters=semantic_filters,
         redis_key=exact_key,
         ttl_seconds=RAG_CACHE_TTL_SECONDS,
