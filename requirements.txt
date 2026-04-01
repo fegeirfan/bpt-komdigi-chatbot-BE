@@ -25,5 +25,4 @@ langchain-openai==0.1.7
 langchain-qdrant==0.1.4
 
 # Vertex AI
-langchain-google-vertexai==0.1.6
 google-cloud-aiplatform==1.49.0

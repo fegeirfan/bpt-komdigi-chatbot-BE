@@ -5,14 +5,13 @@ import os
 import uuid
 
 from dotenv import load_dotenv
-from langchain_google_vertexai import ChatVertexAI, VertexAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
-from langchain_core.prompts import PromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.db import docs_collection, qdrant_client
 from app.rag_impl import cache
 from app.rag_impl.loaders import load_documents
+from app.vertex_ai import VertexAIGenerativeText, VertexAITextEmbeddings
 
 
 load_dotenv()
@@ -83,16 +82,17 @@ _init_docs_collection()
 cache.ensure_semantic_collection(SEMANTIC_CACHE_ENABLED, SEMANTIC_CACHE_COLLECTION, vector_size=768)
 
 
-gemini_model = ChatVertexAI(
+embeddings = VertexAITextEmbeddings(
+    model_name=EMBEDDING_MODEL,
+    project=PROJECT_ID,
+    location=LOCATION,
+)
+
+llm = VertexAIGenerativeText(
     model_name=LLM_MODEL,
     project=PROJECT_ID,
     location=LOCATION,
     temperature=LLM_TEMPERATURE,
-)
-embeddings = VertexAIEmbeddings(
-    model_name=EMBEDDING_MODEL,
-    project=PROJECT_ID,
-    location=LOCATION,
 )
 
 vector_store = QdrantVectorStore(
@@ -192,11 +192,10 @@ Pertanyaan Pengguna: {question}
 
 Jawaban Anda:"""
 
-    prompt = PromptTemplate.from_template(template)
-    chain = prompt | gemini_model
-    response = chain.invoke({"context": context, "question": query, "fallback": _fallback_message()})
+    prompt = template.format(context=context, question=query, fallback=_fallback_message())
+    answer = llm.generate(prompt)
 
-    answer = (response.content or "").strip()
+    answer = (answer or "").strip()
     fallback = _fallback_message()
     if "tidak ditemukan" in answer.lower() and fallback not in answer:
         answer = fallback
@@ -216,4 +215,3 @@ Jawaban Anda:"""
     )
 
     return result
-
