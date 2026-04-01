@@ -14,7 +14,9 @@ load_dotenv()
 ensure_google_application_credentials()
 
 from app.db import chats_collection, docs_collection  # noqa: E402
-from app.rag import ask_chatbot, process_document  # noqa: E402
+def get_rag():
+    from app.rag import ask_chatbot, process_document
+    return ask_chatbot, process_document
 
 app = FastAPI(title="BPT Komdigi RAG API")
 
@@ -30,6 +32,11 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "BPT Komdigi Backend API is running."}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.post("/api/upload")
@@ -97,3 +104,12 @@ def get_documents():
         return {"documents": docs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gagal ambil dokumen: {str(e)}")
+def get_rag():
+    try:
+        from app.rag import ask_chatbot, process_document
+        return ask_chatbot, process_document
+    except Exception as e:
+        import traceback
+        print("RAG IMPORT ERROR:")
+        print(traceback.format_exc())
+        raise e
