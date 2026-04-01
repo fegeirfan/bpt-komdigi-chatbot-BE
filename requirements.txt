@@ -18,9 +18,9 @@ docx2txt==0.8
 pdfplumber==0.11.0
 pypdf==4.2.0
 
-# LangChain stack (DIKUNCI)
-langchain==0.1.20
-langchain-community==0.0.38
+# LangChain stack
+langchain==0.2.16
+langchain-community==0.2.16
 langchain-openai==0.1.7
 langchain-qdrant==0.1.4
 
